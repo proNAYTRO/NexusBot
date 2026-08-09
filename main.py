@@ -46,14 +46,11 @@ try:
     existing = await bot.http.get_global_commands(bot.application_id)
     entry_point = next((c for c in existing if c.get("type") == 4), None)
 
-    synced = await bot.tree.sync()
-
+    all_commands = [c.to_dict() for c in bot.tree.get_commands()]
     if entry_point:
-        # re-add the entry point command via raw bulk overwrite
-        all_commands = [c.to_dict() for c in bot.tree.get_commands()]
-        await bot.http.bulk_upsert_global_commands(
-            bot.application_id, all_commands + [entry_point]
-        )
+        all_commands.append(entry_point)
+
+    synced = await bot.http.bulk_upsert_global_commands(bot.application_id, all_commands)
     log("✓", GREEN, "COMMANDS", f"{len(synced)} slash command(s) synced")
 except Exception as e:
     log("✗", RED, "SYNC", str(e))
