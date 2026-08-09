@@ -1,0 +1,13 @@
+# Secrets — never commit
+.env
+
+# Runtime data / state — regenerated or managed on the host (see CLAUDE.md)
+data/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
