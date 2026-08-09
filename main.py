@@ -42,18 +42,21 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-@bot.event
-async def on_ready():
-    divider()
-    log("✓", GREEN,  "BOT",     f"{bot.user} (ID: {bot.user.id})")
-    log("✓", GREEN,  "GUILDS",  str(len(bot.guilds)))
-    log("◉", CYAN,   "TIME",    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))
+try:
+    existing = await bot.http.get_global_commands(bot.application_id)
+    entry_point = next((c for c in existing if c.get("type") == 4), None)
 
-    try:
-        synced = await bot.tree.sync()
-        log("✓", GREEN, "COMMANDS", f"{len(synced)} slash command(s) synced")
-    except Exception as e:
-        log("✗", RED, "SYNC", str(e))
+    synced = await bot.tree.sync()
+
+    if entry_point:
+        # re-add the entry point command via raw bulk overwrite
+        all_commands = [c.to_dict() for c in bot.tree.get_commands()]
+        await bot.http.bulk_upsert_global_commands(
+            bot.application_id, all_commands + [entry_point]
+        )
+    log("✓", GREEN, "COMMANDS", f"{len(synced)} slash command(s) synced")
+except Exception as e:
+    log("✗", RED, "SYNC", str(e))
 
     presence_text = "/nexhelp..."
     await bot.change_presence(
