@@ -2,7 +2,7 @@
 .env
 
 # Runtime data / state — regenerated or managed on the host (see CLAUDE.md)
-# data/
+ data/
 
 # Python bytecode
 __pycache__/
