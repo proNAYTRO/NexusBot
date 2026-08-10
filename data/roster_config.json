@@ -1,0 +1,121 @@
+{
+  "top_pool": [
+    "#2LQYLVQ82",
+    "#92QUCULV",
+    "#GGRY80R0"
+  ],
+  "overflow": [
+    "#2L9VVY0RL",
+    "#Y880CVR0",
+    "#22CJ9CRL0"
+  ],
+  "voodoo": "#2YRPL0PQ0",
+  "scoring": {
+    "alpha": 2,
+    "beta": 2,
+    "min_attempts": 4,
+    "max_defender_th": 18,
+    "cwl_star_promote": 20,
+    "promote_nudge": 3,
+    "default_size": 30,
+    "voodoo_pullup_min": 78
+  },
+  "constraints": {
+    "max_rotators": 2,
+    "min_coleaders": 2
+  },
+  "leagues": {
+    "48000022": {
+      "name": "Legend League",
+      "rank": 22
+    },
+    "48000021": {
+      "name": "Titan League I",
+      "rank": 21
+    },
+    "48000020": {
+      "name": "Titan League II",
+      "rank": 20
+    },
+    "48000019": {
+      "name": "Titan League III",
+      "rank": 19
+    },
+    "48000018": {
+      "name": "Champion League I",
+      "rank": 18
+    },
+    "48000017": {
+      "name": "Champion League II",
+      "rank": 17
+    },
+    "48000016": {
+      "name": "Champion League III",
+      "rank": 16
+    },
+    "48000015": {
+      "name": "Master League I",
+      "rank": 15
+    },
+    "48000014": {
+      "name": "Master League II",
+      "rank": 14
+    },
+    "48000013": {
+      "name": "Master League III",
+      "rank": 13
+    },
+    "48000012": {
+      "name": "Crystal League I",
+      "rank": 12
+    },
+    "48000011": {
+      "name": "Crystal League II",
+      "rank": 11
+    },
+    "48000010": {
+      "name": "Crystal League III",
+      "rank": 10
+    },
+    "48000009": {
+      "name": "Gold League I",
+      "rank": 9
+    },
+    "48000008": {
+      "name": "Gold League II",
+      "rank": 8
+    },
+    "48000007": {
+      "name": "Gold League III",
+      "rank": 7
+    },
+    "48000006": {
+      "name": "Silver League I",
+      "rank": 6
+    },
+    "48000005": {
+      "name": "Silver League II",
+      "rank": 5
+    },
+    "48000004": {
+      "name": "Silver League III",
+      "rank": 4
+    },
+    "48000003": {
+      "name": "Bronze League I",
+      "rank": 3
+    },
+    "48000002": {
+      "name": "Bronze League II",
+      "rank": 2
+    },
+    "48000001": {
+      "name": "Bronze League III",
+      "rank": 1
+    },
+    "48000000": {
+      "name": "Unranked",
+      "rank": 0
+    }
+  }
+}
