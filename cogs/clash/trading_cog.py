@@ -19,6 +19,7 @@ from discord.ext import commands
 
 from ._troop_data import CATEGORIES, TROOPS, ANY_TROOP
 from ._trade_store import TradeStore
+from ._troop_emojis import troop_emoji_str, troop_emoji_partial
 
 BOARD_COLOR = 0xF0B232
 
@@ -48,7 +49,10 @@ class CategorySelect(discord.ui.Select):
 class TroopSelect(discord.ui.Select):
     def __init__(self, flow, field, troops, placeholder, row, current=None):
         options = [
-            discord.SelectOption(label=t, value=t, default=(t == current))
+            discord.SelectOption(
+                label=t, value=t, default=(t == current),
+                emoji=troop_emoji_partial(t),
+            )
             for t in troops[:25]
         ]
         super().__init__(placeholder=placeholder, options=options, row=row)
@@ -99,8 +103,11 @@ class QuantityModal(discord.ui.Modal, title="How many?"):
             interaction.guild_id, interaction.user.id, self.flow.category,
             self.flow.have, have_qty, self.flow.want, want_qty,
         )
+        have_e = troop_emoji_str(self.flow.have)
+        want_e = troop_emoji_str(self.flow.want)
         await interaction.response.send_message(
-            f"Trade posted: **{have_qty}x {self.flow.have}** → **{want_qty}x {self.flow.want}**",
+            f"Trade posted: **{have_qty}x {have_e} {self.flow.have}** → "
+            f"**{want_qty}x {want_e} {self.flow.want}**",
             ephemeral=True,
         )
         await cog.update_board(interaction.guild)
@@ -126,8 +133,10 @@ class TradeFlowView(discord.ui.View):
     def embed(self):
         e = discord.Embed(title="Post a trade", color=BOARD_COLOR)
         e.add_field(name="Category", value=CATEGORIES.get(self.category, "—"), inline=False)
-        e.add_field(name="I have", value=self.have or "—")
-        e.add_field(name="I want", value=self.want or "—")
+        have_display = f"{troop_emoji_str(self.have)} {self.have}".strip() if self.have else "—"
+        want_display = f"{troop_emoji_str(self.want)} {self.want}".strip() if self.want else "—"
+        e.add_field(name="I have", value=have_display)
+        e.add_field(name="I want", value=want_display)
         e.set_footer(text="Pick a category, then what you have and want. Quantities come last.")
         return e
 
@@ -156,6 +165,7 @@ class CancelSelect(discord.ui.Select):
             discord.SelectOption(
                 label=f"{t['have_qty']}x {t['have']} → {t['want_qty']}x {t['want']}"[:100],
                 value=t["id"],
+                emoji=troop_emoji_partial(t["have"]),
             )
             for t in trades[:25]
         ]
@@ -240,7 +250,12 @@ class TradingCog(commands.Cog):
                 for t in trades[:25]:
                     member = guild.get_member(t["user_id"])
                     name = member.display_name if member else f"<@{t['user_id']}>"
-                    lines.append(f"**{name}** — {t['have_qty']}x {t['have']} → {t['want_qty']}x {t['want']}")
+                    have_e = troop_emoji_str(t["have"])
+                    want_e = troop_emoji_str(t["want"])
+                    lines.append(
+                        f"**{name}** — {t['have_qty']}x {have_e} {t['have']} → "
+                        f"{t['want_qty']}x {want_e} {t['want']}"
+                    )
                 e.description = "\n".join(lines)
             embeds.append(e)
 
@@ -268,13 +283,16 @@ class TradingCog(commands.Cog):
                 await self._safe_dm(
                     poster,
                     f"Match in **{cat_label}**: {other.display_name} has "
-                    f"{other_trade['have_qty']}x {other_trade['have']} and wants your {trade['have']}.",
+                    f"{other_trade['have_qty']}x {troop_emoji_str(other_trade['have'])} "
+                    f"{other_trade['have']} and wants your "
+                    f"{troop_emoji_str(trade['have'])} {trade['have']}.",
                 )
             if other and self.store.get_notify(guild.id, other.id) and poster:
                 await self._safe_dm(
                     other,
                     f"Match in **{cat_label}**: {poster.display_name} posted "
-                    f"{trade['have_qty']}x {trade['have']} looking for your {other_trade['have']}.",
+                    f"{trade['have_qty']}x {troop_emoji_str(trade['have'])} {trade['have']} "
+                    f"looking for your {troop_emoji_str(other_trade['have'])} {other_trade['have']}.",
                 )
 
     @staticmethod
