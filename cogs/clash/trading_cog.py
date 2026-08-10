@@ -1,4 +1,4 @@
-```python
+
 """
 Nexdle trading system -- discord.py cog.
 
@@ -822,4 +822,4 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(
         TradingCog(bot),
     )
-```
+
