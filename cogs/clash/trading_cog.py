@@ -1,4 +1,3 @@
-
 """
 Nexdle trading system -- discord.py cog.
 
@@ -20,6 +19,8 @@ Load with:
 
     await bot.load_extension("trading_cog")
 """
+
+import itertools
 
 import discord
 from discord import app_commands
@@ -61,8 +62,8 @@ class CategorySelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if self.flow.category != self.values[0]:
             # Category changed -> troop picks are no longer valid
-            self.flow.have = None
-            self.flow.want = None
+            self.flow.have = []
+            self.flow.want = []
 
         self.flow.category = self.values[0]
 
@@ -70,6 +71,15 @@ class CategorySelect(discord.ui.Select):
 
 
 class TroopSelect(discord.ui.Select):
+    """
+    Multi-select troop picker.
+
+    Lets the user pick several troops at once for "have" or "want"
+    instead of posting one trade at a time. self.flow.have / .want
+    are lists now -- PostButton turns them into one trade per
+    have/want pairing.
+    """
+
     def __init__(
         self,
         flow,
@@ -79,11 +89,13 @@ class TroopSelect(discord.ui.Select):
         row,
         current=None,
     ):
+        current = current or []
+
         options = [
             discord.SelectOption(
                 label=t,
                 value=t,
-                default=(t == current),
+                default=(t in current),
                 emoji=troop_emoji_partial(t),
             )
             for t in troops[:25]
@@ -92,6 +104,8 @@ class TroopSelect(discord.ui.Select):
         super().__init__(
             placeholder=placeholder,
             options=options,
+            min_values=1,
+            max_values=len(options),
             row=row,
         )
 
@@ -99,9 +113,12 @@ class TroopSelect(discord.ui.Select):
         self.field = field
 
     async def callback(self, interaction: discord.Interaction):
-        setattr(self.flow, self.field, self.values[0])
+        setattr(self.flow, self.field, list(self.values))
 
         await self.flow.refresh(interaction)
+
+
+MAX_TRADES_PER_POST = 25  # sanity cap so one click can't spam the board
 
 
 class PostButton(discord.ui.Button):
@@ -116,36 +133,66 @@ class PostButton(discord.ui.Button):
         self.flow = flow
 
     async def callback(self, interaction: discord.Interaction):
-        if self.flow.have == self.flow.want:
+        # -------------------------------------------------------------
+        # One trade per (have, want) pairing, skipping same-troop pairs
+        # -------------------------------------------------------------
+
+        pairs = [
+            (h, w)
+            for h, w in itertools.product(self.flow.have, self.flow.want)
+            if h != w
+        ]
+
+        if not pairs:
             await interaction.response.send_message(
                 "Have and want can't be the same troop.",
                 ephemeral=True,
             )
             return
 
+        if len(pairs) > MAX_TRADES_PER_POST:
+            await interaction.response.send_message(
+                f"That's {len(pairs)} trades at once -- please select "
+                f"fewer troops (max {MAX_TRADES_PER_POST} combinations "
+                "per post).",
+                ephemeral=True,
+            )
+            return
+
         cog = self.flow.cog
 
-        trade = await cog.store.add_trade(
-            interaction.guild_id,
-            interaction.user.id,
-            self.flow.category,
-            self.flow.have,
-            1,
-            self.flow.want,
-            1,
-        )
+        posted = []
 
-        have_e = troop_emoji_str(self.flow.have)
-        want_e = troop_emoji_str(self.flow.want)
+        for have, want in pairs:
+            trade = await cog.store.add_trade(
+                interaction.guild_id,
+                interaction.user.id,
+                self.flow.category,
+                have,
+                1,
+                want,
+                1,
+            )
+
+            posted.append(trade)
+
+        lines = [
+            f"**{troop_emoji_str(t['have'])} {t['have']}** → "
+            f"**{troop_emoji_str(t['want'])} {t['want']}**"
+            for t in posted
+        ]
+
+        summary = "\n".join(lines)
 
         await interaction.response.send_message(
-            f"Trade posted: **{have_e} {self.flow.have}** → "
-            f"**{want_e} {self.flow.want}**",
+            f"Posted {len(posted)} trade(s):\n{summary}",
             ephemeral=True,
         )
 
         await cog.update_board(interaction.guild)
-        await cog.check_matches(interaction.guild, trade)
+
+        for trade in posted:
+            await cog.check_matches(interaction.guild, trade)
 
 
 class TradeFlowView(discord.ui.View):
@@ -156,8 +203,8 @@ class TradeFlowView(discord.ui.View):
         self.author = author
 
         self.category = None
-        self.have = None
-        self.want = None
+        self.have = []
+        self.want = []
 
         self.rebuild_items()
 
@@ -186,32 +233,36 @@ class TradeFlowView(discord.ui.View):
             inline=False,
         )
 
-        have_display = (
-            f"{troop_emoji_str(self.have)} {self.have}".strip()
-            if self.have
-            else "—"
-        )
+        def troop_list_display(troops):
+            if not troops:
+                return "—"
 
-        want_display = (
-            f"{troop_emoji_str(self.want)} {self.want}".strip()
-            if self.want
-            else "—"
-        )
+            return "\n".join(
+                f"{troop_emoji_str(t)} {t}".strip() for t in troops
+            )
 
         e.add_field(
             name="I have",
-            value=have_display,
+            value=troop_list_display(self.have),
         )
 
         e.add_field(
             name="I want",
-            value=want_display,
+            value=troop_list_display(self.want),
+        )
+
+        pair_count = len(
+            [(h, w) for h, w in itertools.product(self.have, self.want) if h != w]
         )
 
         e.set_footer(
             text=(
-                "Pick a category, then what you have and want. "
-                "Quantities come last."
+                "Pick a category, then select multiple troops for "
+                "have/want if you like -- one trade is posted per "
+                f"combination ({pair_count} trade(s) will be posted)."
+                if pair_count
+                else "Pick a category, then what you have and want. "
+                "You can select more than one of each."
             )
         )
 
@@ -256,6 +307,7 @@ class TradeFlowView(discord.ui.View):
             self.category
             and self.have
             and self.want
+            and any(h != w for h in self.have for w in self.want)
         )
 
         self.add_item(
@@ -822,4 +874,3 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(
         TradingCog(bot),
     )
-
