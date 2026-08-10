@@ -75,39 +75,16 @@ class PostButton(discord.ui.Button):
                 "Have and want can't be the same troop.", ephemeral=True
             )
             return
-        await interaction.response.send_modal(QuantityModal(self.flow))
-
-
-class QuantityModal(discord.ui.Modal, title="How many?"):
-    have_qty = discord.ui.TextInput(label="Quantity you have", default="1", max_length=3)
-    want_qty = discord.ui.TextInput(label="Quantity you want", default="1", max_length=3)
-
-    def __init__(self, flow):
-        super().__init__()
-        self.flow = flow
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            have_qty = int(self.have_qty.value)
-            want_qty = int(self.want_qty.value)
-            if have_qty < 1 or want_qty < 1:
-                raise ValueError
-        except ValueError:
-            await interaction.response.send_message(
-                "Quantities need to be whole numbers of 1 or more.", ephemeral=True
-            )
-            return
 
         cog = self.flow.cog
         trade = await cog.store.add_trade(
             interaction.guild_id, interaction.user.id, self.flow.category,
-            self.flow.have, have_qty, self.flow.want, want_qty,
+            self.flow.have, 1, self.flow.want, 1,
         )
         have_e = troop_emoji_str(self.flow.have)
         want_e = troop_emoji_str(self.flow.want)
         await interaction.response.send_message(
-            f"Trade posted: **{have_qty}x {have_e} {self.flow.have}** → "
-            f"**{want_qty}x {want_e} {self.flow.want}**",
+            f"Trade posted: **{have_e} {self.flow.have}** → **{want_e} {self.flow.want}**",
             ephemeral=True,
         )
         await cog.update_board(interaction.guild)
@@ -163,7 +140,7 @@ class CancelSelect(discord.ui.Select):
     def __init__(self, cog, trades):
         options = [
             discord.SelectOption(
-                label=f"{t['have_qty']}x {t['have']} → {t['want_qty']}x {t['want']}"[:100],
+                label=f"{t['have']} → {t['want']}"[:100],
                 value=t["id"],
                 emoji=troop_emoji_partial(t["have"]),
             )
@@ -253,8 +230,7 @@ class TradingCog(commands.Cog):
                     have_e = troop_emoji_str(t["have"])
                     want_e = troop_emoji_str(t["want"])
                     lines.append(
-                        f"**{name}** — {t['have_qty']}x {have_e} {t['have']} → "
-                        f"{t['want_qty']}x {want_e} {t['want']}"
+                        f"**{name}** — {have_e} {t['have']} → {want_e} {t['want']}"
                     )
                 e.description = "\n".join(lines)
             embeds.append(e)
@@ -283,15 +259,14 @@ class TradingCog(commands.Cog):
                 await self._safe_dm(
                     poster,
                     f"Match in **{cat_label}**: {other.display_name} has "
-                    f"{other_trade['have_qty']}x {troop_emoji_str(other_trade['have'])} "
-                    f"{other_trade['have']} and wants your "
+                    f"{troop_emoji_str(other_trade['have'])} {other_trade['have']} and wants your "
                     f"{troop_emoji_str(trade['have'])} {trade['have']}.",
                 )
             if other and self.store.get_notify(guild.id, other.id) and poster:
                 await self._safe_dm(
                     other,
                     f"Match in **{cat_label}**: {poster.display_name} posted "
-                    f"{trade['have_qty']}x {troop_emoji_str(trade['have'])} {trade['have']} "
+                    f"{troop_emoji_str(trade['have'])} {trade['have']} "
                     f"looking for your {troop_emoji_str(other_trade['have'])} {other_trade['have']}.",
                 )
 
