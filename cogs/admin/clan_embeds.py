@@ -78,6 +78,8 @@ from ._clan_embed_store import (
 COC_API_BASE = (
     "https://api.clashofclans.com/v1"
 )
+WEBHOOK_NAME = "Krewe of Clash"
+WEBHOOK_AVATAR_URL = "https://i.imgur.com/39komel.png"
 
 
 class ClashAPIError(Exception):
@@ -1184,6 +1186,8 @@ class ClanPanelView(
                     except discord.NotFound:
 
                         message = await webhook.send(
+                            username=WEBHOOK_NAME,
+                            avatar_url=WEBHOOK_AVATAR_URL,
                             embed=embed,
                             thread=thread,
                             wait=True,
@@ -1205,10 +1209,15 @@ class ClanPanelView(
                 else:
 
                     message = await webhook.send(
-                        embed=embed,
-                        thread=thread,
-                        wait=True,
-                    )
+                       username=WEBHOOK_NAME,
+                       avatar_url=WEBHOOK_AVATAR_URL,
+                       embed=embed,
+                       thread=thread,
+                       wait=True,
+                    )  
+
+
+
 
                     entry.message_id = (
                         message.id
