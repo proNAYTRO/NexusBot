@@ -690,8 +690,10 @@ def format_cwl_league(
     if emoji_name:
 
         try:
-            return emoji(
-                emoji_name
+
+            return (
+                f"{emoji(emoji_name)} "
+                f"{league_name}"
             )
 
         except KeyError:
