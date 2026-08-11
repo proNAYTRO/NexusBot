@@ -67,9 +67,14 @@ from ._clan_embed_store import (
 # Diognosis command to check the state of the application emojis.
 
 
-@commands.command()
-@commands.is_owner()
-async def testappemoji(self, ctx):
+@app_commands.command(
+    name="testappemoji",
+    description="Test application emoji access",
+)
+async def testappemoji(
+    self,
+    interaction: discord.Interaction,
+):
     try:
         emojis = await self.bot.fetch_application_emojis()
 
@@ -80,6 +85,10 @@ async def testappemoji(self, ctx):
                 "TH18",
                 "TH17",
                 "TH16",
+                "TH15",
+                "TH14",
+                "TH12",
+                "TH11",
                 "Champ_1",
                 "Champ_2",
                 "Champ_3",
@@ -88,23 +97,25 @@ async def testappemoji(self, ctx):
                     f"name={e.name} | "
                     f"id={e.id} | "
                     f"animated={e.animated} | "
-                    f"str={str(e)} | "
-                    f"repr={repr(e)}"
+                    f"str={str(e)}"
                 )
 
         if not lines:
-            await ctx.send(
-                "No matching application emojis found."
+            await interaction.response.send_message(
+                "No matching application emojis found.",
+                ephemeral=True,
             )
             return
 
-        await ctx.send(
-            "\n".join(lines)
+        await interaction.response.send_message(
+            "\n".join(lines),
+            ephemeral=True,
         )
 
     except Exception as exc:
-        await ctx.send(
-            f"ERROR: `{type(exc).__name__}: {exc}`"
+        await interaction.response.send_message(
+            f"ERROR: `{type(exc).__name__}: {exc}`",
+            ephemeral=True,
         )
 
 
