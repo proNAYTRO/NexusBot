@@ -52,6 +52,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+
+from utils.emojis import emoji
 from ._clan_embed_store import (
     ClanEmbedStore,
     ClanEmbedEntry,
@@ -141,6 +143,7 @@ class ClashAPI:
                 return data
 
 
+
 # ---------------------------------------------------------------------------
 # Clash API formatting
 # ---------------------------------------------------------------------------
@@ -220,10 +223,67 @@ def format_cwl_league(
         or {}
     )
 
-    return league.get(
-        "name",
-        "Unranked",
+    league_name = (
+        league.get("name")
+        or "Unranked"
     )
+
+    # ---------------------------------------------------------------
+    # Clash API league name -> application emoji pack name.
+    #
+    # Examples:
+    #   "Champion League I"   -> Champ_1
+    #   "Master League II"    -> Master_2
+    #   "Crystal League III"  -> Crystal_3
+    #
+    # The API uses Roman numerals while the emoji pack uses
+    # _1 / _2 / _3.
+    # ---------------------------------------------------------------
+
+    cwl_emoji_map = {
+        "Bronze League I": "Bronze_1",
+        "Bronze League II": "Bronze_2",
+        "Bronze League III": "Bronze_3",
+
+        "Silver League I": "Silver_1",
+        "Silver League II": "Silver_2",
+        "Silver League III": "Silver_3",
+
+        "Gold League I": "Gold_1",
+        "Gold League II": "Gold_2",
+        "Gold League III": "Gold_3",
+
+        "Crystal League I": "Crystal_1",
+        "Crystal League II": "Crystal_2",
+        "Crystal League III": "Crystal_3",
+
+        "Master League I": "Master_1",
+        "Master League II": "Master_2",
+        "Master League III": "Master_3",
+
+        "Champion League I": "Champ_1",
+        "Champion League II": "Champ_2",
+        "Champion League III": "Champ_3",
+
+        "Titan League I": "Titan_1",
+        "Titan League II": "Titan_2",
+        "Titan League III": "Titan_3",
+
+        "Legend League": "Legend_L",
+    }
+
+    emoji_name = cwl_emoji_map.get(
+        league_name
+    )
+
+    if emoji_name:
+        return emoji(
+            emoji_name
+        )
+
+    # Safety fallback if Clash ever returns
+    # an unexpected/new league name.
+    return league_name
 
 
 def format_capital_league(
@@ -255,38 +315,11 @@ def format_capital_info(
         "—",
     )
 
-    districts = (
-        capital.get("districts")
-        or []
-    )
-
-    if not districts:
-        return (
-            f"Hall Level **{hall_level}**"
-        )
-
-    district_lines = []
-
-    for district in districts:
-
-        district_name = district.get(
-            "name",
-            "Unknown",
-        )
-
-        district_level = district.get(
-            "districtHallLevel",
-            "—",
-        )
-
-        district_lines.append(
-            f"{district_name} "
-            f"**{district_level}**"
-        )
-
+    # Only show the Capital Hall level.
+    #
+    # District Hall levels are intentionally NOT displayed.
     return (
-        f"Hall Level **{hall_level}**\n"
-        + " · ".join(district_lines)
+        f"Hall Level **{hall_level}**"
     )
 
 
@@ -319,10 +352,39 @@ def format_townhall_composition(
         reverse=True,
     )
 
-    return " · ".join(
-        f"TH{level} × {count}"
-        for level, count in ordered
-    )
+    # ---------------------------------------------------------------
+    # Town Hall application emojis.
+    #
+    # Final format:
+    #
+    #   <TH18 emoji> 5 · <TH17 emoji> 3 · <TH16 emoji> 2
+    #
+    # There is intentionally NO "TH18 × 5" text anymore.
+    # ---------------------------------------------------------------
+
+    parts = []
+
+    for level, count in ordered:
+
+        emoji_name = f"TH{level}"
+
+        try:
+            th_emoji = emoji(
+                emoji_name
+            )
+
+        except KeyError:
+            # Safety fallback for a TH level that isn't
+            # present in the emoji pack.
+            th_emoji = f"TH{level}"
+
+        parts.append(
+            f"{th_emoji} {count}"
+        )
+
+    return " · ".join(parts)
+
+
 
 
 # ---------------------------------------------------------------------------
