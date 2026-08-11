@@ -1032,36 +1032,101 @@ class EditInfoModal(
 # Location picker
 # ============================================================================
 
-class LocationSelect(
-    discord.ui.ChannelSelect
+class SetLocationModal(
+    discord.ui.Modal,
+    title="Set Location",
 ):
+    """
+    Channel/thread selects are unreliable for finding a specific
+    thread (Discord doesn't surface archived/nested threads well
+    in the picker), so location is set by pasting the ID directly.
+    """
 
     def __init__(
         self,
         panel: "ClanPanelView",
     ):
-
-        super().__init__(
-            placeholder=(
-                "Choose a channel or thread…"
-            ),
-            channel_types=[
-                discord.ChannelType.text,
-                discord.ChannelType.public_thread,
-                discord.ChannelType.private_thread,
-            ],
-            min_values=1,
-            max_values=1,
-        )
+        super().__init__()
 
         self.panel = panel
 
-    async def callback(
+        self.location_input = (
+            discord.ui.TextInput(
+                label="Channel or Thread ID",
+                style=discord.TextStyle.short,
+                placeholder=(
+                    "e.g. 123456789012345678"
+                ),
+                required=True,
+                max_length=25,
+            )
+        )
+
+        self.add_item(
+            self.location_input
+        )
+
+    async def on_submit(
         self,
         interaction: discord.Interaction,
     ):
 
-        target = self.values[0]
+        raw_id = (
+            self.location_input.value.strip()
+        )
+
+        if not raw_id.isdigit():
+
+            await interaction.response.send_message(
+                "That's not a valid ID. Right-click "
+                "the channel/thread → **Copy Channel ID** "
+                "(Developer Mode must be enabled).",
+                ephemeral=True,
+            )
+
+            return
+
+        target_id = int(raw_id)
+
+        channel = (
+            interaction.guild.get_channel_or_thread(
+                target_id
+            )
+        )
+
+        if channel is None:
+
+            try:
+
+                channel = (
+                    await interaction.client.fetch_channel(
+                        target_id
+                    )
+                )
+
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+            ):
+
+                channel = None
+
+        if channel is None or not isinstance(
+            channel,
+            (
+                discord.TextChannel,
+                discord.Thread,
+            ),
+        ):
+
+            await interaction.response.send_message(
+                "Couldn't find that channel/thread — "
+                "either the ID is wrong or the bot "
+                "doesn't have access to it.",
+                ephemeral=True,
+            )
+
+            return
 
         entry = (
             self.panel.store.get_or_create_clan(
@@ -1070,17 +1135,17 @@ class LocationSelect(
             )
         )
 
-        if target.type in (
-            discord.ChannelType.public_thread,
-            discord.ChannelType.private_thread,
+        if isinstance(
+            channel,
+            discord.Thread,
         ):
 
-            entry.thread_id = target.id
-            entry.channel_id = target.parent_id
+            entry.thread_id = channel.id
+            entry.channel_id = channel.parent_id
 
         else:
 
-            entry.channel_id = target.id
+            entry.channel_id = channel.id
             entry.thread_id = None
 
         # The old message is no longer the current message
@@ -1096,27 +1161,9 @@ class LocationSelect(
             entry,
         )
 
-        await self.panel.publish_or_edit(
+        await self.panel._render(
             interaction,
             entry,
-        )
-
-
-class LocationView(
-    discord.ui.View
-):
-
-    def __init__(
-        self,
-        panel: "ClanPanelView",
-    ):
-
-        super().__init__(
-            timeout=180
-        )
-
-        self.add_item(
-            LocationSelect(panel)
         )
 
 
@@ -1533,6 +1580,43 @@ class ClanPanelView(
         )
 
     # ========================================================================
+    # Send
+    # ========================================================================
+
+    @discord.ui.button(
+        label="Send",
+        style=discord.ButtonStyle.success,
+        row=0,
+    )
+    async def send_btn(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        entry = (
+            self.store.get_or_create_clan(
+                self.clan_name,
+                self.tag,
+            )
+        )
+
+        if not entry.channel_id:
+
+            await interaction.response.send_message(
+                "No location set. Use "
+                "**Set Location** first.",
+                ephemeral=True,
+            )
+
+            return
+
+        await self.publish_or_edit(
+            interaction,
+            entry,
+        )
+
+    # ========================================================================
     # Set Location
     # ========================================================================
 
@@ -1547,13 +1631,8 @@ class ClanPanelView(
         button: discord.ui.Button,
     ):
 
-        await interaction.response.send_message(
-            (
-                "Pick where this clan embed "
-                "should live:"
-            ),
-            view=LocationView(self),
-            ephemeral=True,
+        await interaction.response.send_modal(
+            SetLocationModal(self)
         )
 
 
@@ -1738,6 +1817,126 @@ class ClanSelectView(
 # /nexrules embed panel
 # ============================================================================
 
+class SetIndexLocationModal(
+    discord.ui.Modal,
+    title="Set Location",
+):
+
+    def __init__(
+        self,
+        panel: "IndexPanelView",
+    ):
+        super().__init__()
+
+        self.panel = panel
+
+        self.location_input = (
+            discord.ui.TextInput(
+                label="Channel or Thread ID",
+                style=discord.TextStyle.short,
+                placeholder=(
+                    "e.g. 123456789012345678"
+                ),
+                required=True,
+                max_length=25,
+            )
+        )
+
+        self.add_item(
+            self.location_input
+        )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ):
+
+        raw_id = (
+            self.location_input.value.strip()
+        )
+
+        if not raw_id.isdigit():
+
+            await interaction.response.send_message(
+                "That's not a valid ID. Right-click "
+                "the channel/thread → **Copy Channel ID** "
+                "(Developer Mode must be enabled).",
+                ephemeral=True,
+            )
+
+            return
+
+        target_id = int(raw_id)
+
+        channel = (
+            interaction.guild.get_channel_or_thread(
+                target_id
+            )
+        )
+
+        if channel is None:
+
+            try:
+
+                channel = (
+                    await interaction.client.fetch_channel(
+                        target_id
+                    )
+                )
+
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+            ):
+
+                channel = None
+
+        if channel is None or not isinstance(
+            channel,
+            (
+                discord.TextChannel,
+                discord.Thread,
+            ),
+        ):
+
+            await interaction.response.send_message(
+                "Couldn't find that channel/thread — "
+                "either the ID is wrong or the bot "
+                "doesn't have access to it.",
+                ephemeral=True,
+            )
+
+            return
+
+        config = (
+            self.panel.store.get_index_embed()
+        )
+
+        if isinstance(
+            channel,
+            discord.Thread,
+        ):
+
+            config.thread_id = channel.id
+            config.channel_id = channel.parent_id
+
+        else:
+
+            config.channel_id = channel.id
+            config.thread_id = None
+
+        config.message_id = None
+
+        self.panel.store.set_index_embed(
+            config
+        )
+
+        await self.panel._render(
+            interaction,
+            config,
+        )
+
+
 class IndexPanelView(
     discord.ui.View
 ):
@@ -1920,6 +2119,35 @@ class IndexPanelView(
         )
 
     @discord.ui.button(
+        label="Send",
+        style=discord.ButtonStyle.success,
+    )
+    async def send_btn(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+
+        config = (
+            self.store.get_index_embed()
+        )
+
+        if not config.channel_id:
+
+            await interaction.response.send_message(
+                "No location set. Use "
+                "**Set Location** first.",
+                ephemeral=True,
+            )
+
+            return
+
+        await self.publish_or_edit(
+            interaction,
+            config,
+        )
+
+    @discord.ui.button(
         label="Set Location",
         style=discord.ButtonStyle.primary,
     )
@@ -1929,72 +2157,8 @@ class IndexPanelView(
         button: discord.ui.Button,
     ):
 
-        select = discord.ui.ChannelSelect(
-            placeholder=(
-                "Choose a channel or thread…"
-            ),
-            channel_types=[
-                discord.ChannelType.text,
-                discord.ChannelType.public_thread,
-                discord.ChannelType.private_thread,
-            ],
-            min_values=1,
-            max_values=1,
-        )
-
-        async def on_select(
-            inner: discord.Interaction,
-        ):
-
-            target = select.values[0]
-
-            config = (
-                self.store.get_index_embed()
-            )
-
-            if target.type in (
-                discord.ChannelType.public_thread,
-                discord.ChannelType.private_thread,
-            ):
-
-                config.thread_id = target.id
-                config.channel_id = (
-                    target.parent_id
-                )
-
-            else:
-
-                config.channel_id = target.id
-                config.thread_id = None
-
-            config.message_id = None
-
-            self.store.set_index_embed(
-                config
-            )
-
-            await self.publish_or_edit(
-                inner,
-                config,
-            )
-
-        select.callback = on_select
-
-        view = discord.ui.View(
-            timeout=180
-        )
-
-        view.add_item(
-            select
-        )
-
-        await interaction.response.send_message(
-            (
-                "Pick where the index embed "
-                "should live:"
-            ),
-            view=view,
-            ephemeral=True,
+        await interaction.response.send_modal(
+            SetIndexLocationModal(self)
         )
 
 
