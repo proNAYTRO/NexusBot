@@ -29,15 +29,24 @@ Clan showcase embeds:
 - CWL league is displayed.
 - Capital League is displayed.
 - Capital Hall level is displayed.
-- Capital district levels are displayed.
 - Town Hall composition is displayed.
 - Clan showcase messages are sent through Discord webhooks.
 - Multiple clans can use the same webhook.
 - Each clan can use a different thread.
 
+Webhook behaviour:
+
+- Users do NOT manually enter webhook URLs.
+- The bot searches for an existing "NAYTRO NEXUS" webhook.
+- If none exists, the bot creates one.
+- The same webhook can be reused by multiple clans.
+- Each clan stores the webhook URL it uses.
+- If a stored webhook is deleted, the bot automatically finds
+  another existing NAYTRO NEXUS webhook or creates a replacement.
+
 Environment variable:
 
-    COC_API_KEY
+COC_API_KEY
 """
 
 from __future__ import annotations
@@ -52,8 +61,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-
 from utils.emojis import emoji
+
 from ._clan_embed_store import (
     ClanEmbedStore,
     ClanEmbedEntry,
@@ -62,9 +71,9 @@ from ._clan_embed_store import (
 )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Clash API
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 COC_API_BASE = (
     "https://api.clashofclans.com/v1"
@@ -143,10 +152,9 @@ class ClashAPI:
                 return data
 
 
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Clash API formatting
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def build_clan_link(
     tag: str,
@@ -180,11 +188,319 @@ def get_badge_url(
     )
 
 
+# ============================================================================
+# Webhook management
+# ============================================================================
+
+async def get_or_create_clan_webhook(
+    interaction: discord.Interaction,
+    entry: ClanEmbedEntry,
+    store: ClanEmbedStore,
+) -> discord.Webhook:
+    """
+    Find or create the NAYTRO NEXUS webhook for the clan's
+    parent channel.
+
+    The webhook is automatically managed.
+
+    Order:
+
+    1. Validate the configured parent channel.
+    2. Try the webhook URL stored for this clan.
+    3. If it no longer exists, search the channel for an existing
+       NAYTRO NEXUS webhook.
+    4. If none exists, create one.
+    5. Save the resulting webhook URL to the clan entry.
+
+    Multiple clans can therefore share one webhook.
+    """
+
+    if not interaction.guild:
+        raise RuntimeError(
+            "This command can only be used inside a server."
+        )
+
+    if not entry.channel_id:
+        raise RuntimeError(
+            "No parent channel has been selected."
+        )
+
+    channel = (
+        interaction.guild.get_channel(
+            entry.channel_id
+        )
+        or interaction.guild.get_channel_or_thread(
+            entry.channel_id
+        )
+    )
+
+    # If the stored channel happens to be a thread,
+    # use its parent channel for webhook management.
+    if isinstance(
+        channel,
+        discord.Thread,
+    ):
+        channel = channel.parent
+
+    if not isinstance(
+        channel,
+        discord.TextChannel,
+    ):
+        raise RuntimeError(
+            "The clan webhook must be created in a text channel."
+        )
+
+    # ========================================================================
+    # 1. Try the webhook currently stored for this clan.
+    # ========================================================================
+
+    if entry.webhook_url:
+
+        timeout = aiohttp.ClientTimeout(
+            total=15
+        )
+
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
+            try:
+
+                webhook = discord.Webhook.from_url(
+                    entry.webhook_url,
+                    session=session,
+                )
+
+                fetched = await webhook.fetch()
+
+                # Make sure the webhook still belongs to the
+                # expected parent channel.
+                if fetched.channel_id == channel.id:
+                    return fetched
+
+            except (
+                discord.NotFound,
+                discord.HTTPException,
+                discord.InvalidArgument,
+            ):
+                pass
+
+    # ========================================================================
+    # 2. Search the parent channel for an existing NAYTRO NEXUS webhook.
+    #
+    # This is what allows multiple clans to share one webhook.
+    # ========================================================================
+
+    try:
+
+        webhooks = await channel.webhooks()
+
+    except discord.Forbidden:
+        raise RuntimeError(
+            "I need the **Manage Webhooks** permission "
+            f"in {channel.mention}."
+        )
+
+    for webhook in webhooks:
+
+        if (
+            webhook.type
+            == discord.WebhookType.incoming
+            and webhook.name
+            == "NAYTRO NEXUS"
+            and webhook.token
+        ):
+
+            entry.webhook_url = webhook.url
+
+            store.upsert_clan(
+                interaction.guild.get_channel(
+                    entry.channel_id
+                ).name
+                if interaction.guild.get_channel(
+                    entry.channel_id
+                )
+                else "",
+                entry,
+            )
+
+            return webhook
+
+    # ========================================================================
+    # 3. Nothing exists — create the webhook ONCE.
+    # ========================================================================
+
+    try:
+
+        webhook = await channel.create_webhook(
+            name="NAYTRO NEXUS",
+            reason=(
+                "NAYTRO NEXUS clan showcase embeds"
+            ),
+        )
+
+    except discord.Forbidden:
+        raise RuntimeError(
+            "I need the **Manage Webhooks** permission "
+            f"in {channel.mention} to create the clan webhook."
+        )
+
+    return webhook
+
+
+# ============================================================================
+# Helper for assigning a webhook without incorrectly changing clan storage
+# ============================================================================
+
+async def ensure_clan_webhook(
+    interaction: discord.Interaction,
+    store: ClanEmbedStore,
+    clan_name: str,
+    entry: ClanEmbedEntry,
+) -> discord.Webhook:
+
+    """
+    Wrapper around webhook discovery/creation.
+
+    This exists so the webhook URL is stored against the correct clan name.
+    """
+
+    if not interaction.guild:
+        raise RuntimeError(
+            "This command can only be used inside a server."
+        )
+
+    if not entry.channel_id:
+        raise RuntimeError(
+            "No parent channel has been selected."
+        )
+
+    channel = (
+        interaction.guild.get_channel(
+            entry.channel_id
+        )
+        or interaction.guild.get_channel_or_thread(
+            entry.channel_id
+        )
+    )
+
+    if isinstance(
+        channel,
+        discord.Thread,
+    ):
+        channel = channel.parent
+
+    if not isinstance(
+        channel,
+        discord.TextChannel,
+    ):
+        raise RuntimeError(
+            "The selected location must have a text channel parent."
+        )
+
+    # ------------------------------------------------------------------------
+    # Stored webhook
+    # ------------------------------------------------------------------------
+
+    if entry.webhook_url:
+
+        timeout = aiohttp.ClientTimeout(
+            total=15
+        )
+
+        async with aiohttp.ClientSession(
+            timeout=timeout
+        ) as session:
+
+            try:
+
+                webhook = discord.Webhook.from_url(
+                    entry.webhook_url,
+                    session=session,
+                )
+
+                fetched = await webhook.fetch()
+
+                if fetched.channel_id == channel.id:
+                    return fetched
+
+            except (
+                discord.NotFound,
+                discord.HTTPException,
+                discord.InvalidArgument,
+            ):
+                pass
+
+    # ------------------------------------------------------------------------
+    # Existing NAYTRO NEXUS webhook
+    # ------------------------------------------------------------------------
+
+    try:
+
+        webhooks = await channel.webhooks()
+
+    except discord.Forbidden:
+        raise RuntimeError(
+            "I need the **Manage Webhooks** permission "
+            f"in {channel.mention}."
+        )
+
+    for webhook in webhooks:
+
+        if (
+            webhook.type
+            == discord.WebhookType.incoming
+            and webhook.name
+            == "NAYTRO NEXUS"
+            and webhook.token
+        ):
+
+            entry.webhook_url = webhook.url
+
+            store.upsert_clan(
+                clan_name,
+                entry,
+            )
+
+            return webhook
+
+    # ------------------------------------------------------------------------
+    # Create new webhook
+    # ------------------------------------------------------------------------
+
+    try:
+
+        webhook = await channel.create_webhook(
+            name="NAYTRO NEXUS",
+            reason=(
+                "NAYTRO NEXUS clan showcase embeds"
+            ),
+        )
+
+    except discord.Forbidden:
+        raise RuntimeError(
+            "I need the **Manage Webhooks** permission "
+            f"in {channel.mention} to create the clan webhook."
+        )
+
+    entry.webhook_url = webhook.url
+
+    store.upsert_clan(
+        clan_name,
+        entry,
+    )
+
+    return webhook
+
+
+# ============================================================================
+# Clash formatting
+# ============================================================================
+
 def format_war_performance(
     clan: dict,
 ) -> str:
 
-    # Clash API uses warWins / warLosses / warTies.
     wins = clan.get(
         "warWins",
         0,
@@ -228,18 +544,6 @@ def format_cwl_league(
         or "Unranked"
     )
 
-    # ---------------------------------------------------------------
-    # Clash API league name -> application emoji pack name.
-    #
-    # Examples:
-    #   "Champion League I"   -> Champ_1
-    #   "Master League II"    -> Master_2
-    #   "Crystal League III"  -> Crystal_3
-    #
-    # The API uses Roman numerals while the emoji pack uses
-    # _1 / _2 / _3.
-    # ---------------------------------------------------------------
-
     cwl_emoji_map = {
         "Bronze League I": "Bronze_1",
         "Bronze League II": "Bronze_2",
@@ -277,12 +581,15 @@ def format_cwl_league(
     )
 
     if emoji_name:
-        return emoji(
-            emoji_name
-        )
 
-    # Safety fallback if Clash ever returns
-    # an unexpected/new league name.
+        try:
+            return emoji(
+                emoji_name
+            )
+
+        except KeyError:
+            pass
+
     return league_name
 
 
@@ -315,9 +622,6 @@ def format_capital_info(
         "—",
     )
 
-    # Only show the Capital Hall level.
-    #
-    # District Hall levels are intentionally NOT displayed.
     return (
         f"Hall Level **{hall_level}**"
     )
@@ -352,16 +656,6 @@ def format_townhall_composition(
         reverse=True,
     )
 
-    # ---------------------------------------------------------------
-    # Town Hall application emojis.
-    #
-    # Final format:
-    #
-    #   <TH18 emoji> 5 · <TH17 emoji> 3 · <TH16 emoji> 2
-    #
-    # There is intentionally NO "TH18 × 5" text anymore.
-    # ---------------------------------------------------------------
-
     parts = []
 
     for level, count in ordered:
@@ -369,13 +663,13 @@ def format_townhall_composition(
         emoji_name = f"TH{level}"
 
         try:
+
             th_emoji = emoji(
                 emoji_name
             )
 
         except KeyError:
-            # Safety fallback for a TH level that isn't
-            # present in the emoji pack.
+
             th_emoji = f"TH{level}"
 
         parts.append(
@@ -385,11 +679,9 @@ def format_townhall_composition(
     return " · ".join(parts)
 
 
-
-
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Clan showcase embed
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def build_clan_embed(
     name: str,
@@ -411,22 +703,11 @@ def build_clan_embed(
         clan_tag
     )
 
-    # ------------------------------------------------------------------
-    # Clan name is the clickable hyperlink at the absolute top.
-    # ------------------------------------------------------------------
-
     embed = discord.Embed(
         title=clan_name,
         url=clan_link,
         color=discord.Color.dark_purple(),
     )
-
-    # ------------------------------------------------------------------
-    # Description + entry information.
-    #
-    # IMPORTANT:
-    # There is intentionally NO "Requirements" heading.
-    # ------------------------------------------------------------------
 
     text_blocks = []
 
@@ -452,22 +733,15 @@ def build_clan_embed(
             "No description set."
         )
 
-    # ------------------------------------------------------------------
-    # Live clan badge.
-    # ------------------------------------------------------------------
-
     badge_url = get_badge_url(
         clan
     )
 
     if badge_url:
+
         embed.set_thumbnail(
             url=badge_url
         )
-
-    # ------------------------------------------------------------------
-    # Live API information.
-    # ------------------------------------------------------------------
 
     embed.add_field(
         name="War Performance",
@@ -512,9 +786,9 @@ def build_clan_embed(
     return embed
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Index embed
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def build_index_embed(
     all_clans: dict[str, ClanEmbedEntry],
@@ -558,9 +832,9 @@ def build_index_embed(
     return embed
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Status
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def status_line(
     name: str,
@@ -587,9 +861,9 @@ def status_line(
     )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Edit Info Modal
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class EditInfoModal(
     discord.ui.Modal,
@@ -605,10 +879,6 @@ class EditInfoModal(
 
         self.panel = panel
 
-        # --------------------------------------------------------------
-        # Description
-        # --------------------------------------------------------------
-
         self.description_input = (
             discord.ui.TextInput(
                 label="Description",
@@ -618,15 +888,6 @@ class EditInfoModal(
                 max_length=4000,
             )
         )
-
-        # --------------------------------------------------------------
-        # Requirements / entry information.
-        #
-        # The field itself can contain anything you want:
-        # entry requirements, hit rate, wars required, etc.
-        #
-        # It will NOT be labelled "Requirements" on the embed.
-        # --------------------------------------------------------------
 
         self.requirements_input = (
             discord.ui.TextInput(
@@ -638,22 +899,6 @@ class EditInfoModal(
             )
         )
 
-        # --------------------------------------------------------------
-        # Webhook
-        # --------------------------------------------------------------
-
-        self.webhook_input = (
-            discord.ui.TextInput(
-                label="Discord Webhook URL",
-                placeholder=(
-                    "https://discord.com/api/webhooks/..."
-                ),
-                default=entry.webhook_url,
-                required=True,
-                max_length=4000,
-            )
-        )
-
         self.add_item(
             self.description_input
         )
@@ -662,32 +907,10 @@ class EditInfoModal(
             self.requirements_input
         )
 
-        self.add_item(
-            self.webhook_input
-        )
-
     async def on_submit(
         self,
         interaction: discord.Interaction,
     ):
-
-        webhook_url = (
-            self.webhook_input.value.strip()
-        )
-
-        if not webhook_url.startswith(
-            "https://discord.com/api/webhooks/"
-        ):
-
-            await interaction.response.send_message(
-                (
-                    "That does not look like "
-                    "a valid Discord webhook URL."
-                ),
-                ephemeral=True,
-            )
-
-            return
 
         entry = (
             self.panel.store.get_or_create_clan(
@@ -704,8 +927,6 @@ class EditInfoModal(
             self.requirements_input.value.strip()
         )
 
-        entry.webhook_url = webhook_url
-
         self.panel.store.upsert_clan(
             self.panel.clan_name,
             entry,
@@ -717,9 +938,9 @@ class EditInfoModal(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Location picker
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class LocationSelect(
     discord.ui.ChannelSelect
@@ -772,9 +993,13 @@ class LocationSelect(
             entry.channel_id = target.id
             entry.thread_id = None
 
-        # Moving the clan means the old message is no longer
-        # considered the current message.
+        # The old message is no longer the current message
+        # because the location changed.
         entry.message_id = None
+
+        # The webhook belongs to the old channel, so force
+        # webhook discovery for the new location.
+        entry.webhook_url = ""
 
         self.panel.store.upsert_clan(
             self.panel.clan_name,
@@ -805,9 +1030,9 @@ class LocationView(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Clan panel
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class ClanPanelView(
     discord.ui.View
@@ -844,23 +1069,6 @@ class ClanPanelView(
         entry: ClanEmbedEntry,
     ):
 
-        # --------------------------------------------------------------
-        # Configuration checks.
-        # --------------------------------------------------------------
-
-        if not entry.webhook_url:
-
-            await self._render(
-                interaction,
-                entry,
-                error=(
-                    "No webhook URL configured. "
-                    "Use Edit Info first."
-                ),
-            )
-
-            return
-
         if not entry.channel_id:
 
             await self._render(
@@ -874,9 +1082,9 @@ class ClanPanelView(
 
             return
 
-        # --------------------------------------------------------------
-        # Fetch completely fresh Clash API information.
-        # --------------------------------------------------------------
+        # ====================================================================
+        # Get fresh Clash data.
+        # ====================================================================
 
         try:
 
@@ -898,9 +1106,32 @@ class ClanPanelView(
             clan,
         )
 
-        # --------------------------------------------------------------
-        # Webhook session.
-        # --------------------------------------------------------------
+        # ====================================================================
+        # Automatically find/create webhook.
+        # ====================================================================
+
+        try:
+
+            webhook = await ensure_clan_webhook(
+                interaction,
+                self.store,
+                self.clan_name,
+                entry,
+            )
+
+        except RuntimeError as exc:
+
+            await self._render(
+                interaction,
+                entry,
+                error=str(exc),
+            )
+
+            return
+
+        # ====================================================================
+        # Webhook message.
+        # ====================================================================
 
         timeout = aiohttp.ClientTimeout(
             total=20
@@ -917,15 +1148,6 @@ class ClanPanelView(
                     session=session,
                 )
 
-                # ------------------------------------------------------
-                # Resolve the thread.
-                #
-                # IMPORTANT:
-                # The same webhook can be used for multiple threads.
-                # Each clan's stored thread_id determines where its
-                # message goes.
-                # ------------------------------------------------------
-
                 thread = None
 
                 if entry.thread_id:
@@ -939,9 +1161,15 @@ class ClanPanelView(
                         )
                     )
 
-                # ------------------------------------------------------
-                # Existing webhook message.
-                # ------------------------------------------------------
+                    if not isinstance(
+                        thread,
+                        discord.Thread,
+                    ):
+                        thread = None
+
+                # ============================================================
+                # Existing message
+                # ============================================================
 
                 if entry.message_id:
 
@@ -955,8 +1183,6 @@ class ClanPanelView(
 
                     except discord.NotFound:
 
-                        # Message was deleted manually.
-                        # Re-create it.
                         message = await webhook.send(
                             embed=embed,
                             thread=thread,
@@ -972,9 +1198,9 @@ class ClanPanelView(
                             entry,
                         )
 
-                # ------------------------------------------------------
-                # New webhook message.
-                # ------------------------------------------------------
+                # ============================================================
+                # New message
+                # ============================================================
 
                 else:
 
@@ -992,6 +1218,30 @@ class ClanPanelView(
                         self.clan_name,
                         entry,
                     )
+
+            except discord.NotFound:
+
+                # The webhook disappeared between discovery and send.
+                #
+                # Clear it and tell the user to refresh/retry so the
+                # next operation automatically recreates it.
+                entry.webhook_url = ""
+
+                self.store.upsert_clan(
+                    self.clan_name,
+                    entry,
+                )
+
+                await self._render(
+                    interaction,
+                    entry,
+                    error=(
+                        "The webhook was deleted. "
+                        "Use Refresh to recreate it."
+                    ),
+                )
+
+                return
 
             except discord.HTTPException as exc:
 
@@ -1018,10 +1268,6 @@ class ClanPanelView(
         error: str | None = None,
     ):
 
-        # --------------------------------------------------------------
-        # Build current preview.
-        # --------------------------------------------------------------
-
         try:
 
             clan = await self.get_clan_data()
@@ -1034,7 +1280,6 @@ class ClanPanelView(
 
         except Exception:
 
-            # API unavailable — still show the editable content.
             embed = discord.Embed(
                 title=self.clan_name,
                 url=build_clan_link(
@@ -1054,27 +1299,21 @@ class ClanPanelView(
                     + entry.requirements
                 )
 
-        # --------------------------------------------------------------
-        # Location
-        # --------------------------------------------------------------
-
         location = "not set"
 
         if entry.channel_id:
 
             if entry.thread_id:
+
                 location = (
                     f"<#{entry.thread_id}>"
                 )
 
             else:
+
                 location = (
                     f"<#{entry.channel_id}>"
                 )
-
-        # --------------------------------------------------------------
-        # Status
-        # --------------------------------------------------------------
 
         status = (
             "posted"
@@ -1089,6 +1328,7 @@ class ClanPanelView(
         )
 
         if error:
+
             content += (
                 f"\n⚠️ {error}"
             )
@@ -1096,10 +1336,6 @@ class ClanPanelView(
         self.refresh_btn.disabled = (
             not entry.is_posted
         )
-
-        # --------------------------------------------------------------
-        # Update ephemeral panel.
-        # --------------------------------------------------------------
 
         if interaction.response.is_done():
 
@@ -1117,9 +1353,9 @@ class ClanPanelView(
                 view=self,
             )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Refresh
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     @discord.ui.button(
         label="Refresh",
@@ -1145,15 +1381,14 @@ class ClanPanelView(
 
             return
 
-        # This re-queries the Clash API.
         await self.publish_or_edit(
             interaction,
             entry,
         )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Edit Info
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     @discord.ui.button(
         label="Edit Info",
@@ -1180,9 +1415,9 @@ class ClanPanelView(
             )
         )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Set Location
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     @discord.ui.button(
         label="Set Location",
@@ -1205,9 +1440,9 @@ class ClanPanelView(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Clan selector
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class ClanSelect(
     discord.ui.Select
@@ -1282,10 +1517,6 @@ class ClanSelect(
             not entry.is_posted
         )
 
-        # --------------------------------------------------------------
-        # Load live API data for preview.
-        # --------------------------------------------------------------
-
         try:
 
             clan = await self.api.get_clan(
@@ -1327,10 +1558,6 @@ class ClanSelect(
             )
 
             return
-
-        # --------------------------------------------------------------
-        # Location
-        # --------------------------------------------------------------
 
         location = "not set"
 
@@ -1383,9 +1610,9 @@ class ClanSelectView(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # /nexrules embed panel
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class IndexPanelView(
     discord.ui.View
@@ -1460,21 +1687,38 @@ class IndexPanelView(
         config: IndexEmbedConfig,
     ):
 
+        if not interaction.guild:
+
+            await self._render(
+                interaction,
+                config,
+            )
+
+            return
+
         embed = build_index_embed(
             self.store.all_clans()
         )
 
         if config.channel_id:
 
-            channel = (
-                interaction.guild.get_channel_or_thread(
-                    config.thread_id
+            channel = None
+
+            if config.thread_id:
+
+                channel = (
+                    interaction.guild.get_channel_or_thread(
+                        config.thread_id
+                    )
                 )
-                if config.thread_id
-                else interaction.guild.get_channel(
-                    config.channel_id
+
+            else:
+
+                channel = (
+                    interaction.guild.get_channel(
+                        config.channel_id
+                    )
                 )
-            )
 
             if channel:
 
@@ -1570,6 +1814,8 @@ class IndexPanelView(
                 discord.ChannelType.public_thread,
                 discord.ChannelType.private_thread,
             ],
+            min_values=1,
+            max_values=1,
         )
 
         async def on_select(
@@ -1614,7 +1860,9 @@ class IndexPanelView(
             timeout=180
         )
 
-        view.add_item(select)
+        view.add_item(
+            select
+        )
 
         await interaction.response.send_message(
             (
@@ -1626,9 +1874,9 @@ class IndexPanelView(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Cog
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class ClanEmbeds(
     commands.Cog
@@ -1652,12 +1900,9 @@ class ClanEmbeds(
             )
         )
 
-    # ------------------------------------------------------------------
-    # IMPORTANT:
-    # KEEPING YOUR ORIGINAL COMMAND NAME.
-    #
-    # This is /nexclanembed, NOT /nexclan.
-    # ------------------------------------------------------------------
+    # ========================================================================
+    # /nexclanembed
+    # ========================================================================
 
     nexclan = app_commands.Group(
         name="nexclanembed",
@@ -1739,6 +1984,15 @@ class ClanEmbeds(
 
             return
 
+        if not interaction.guild:
+
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+
+            return
+
         lines = [
             status_line(
                 name,
@@ -1806,19 +2060,21 @@ class ClanEmbeds(
             inner: discord.Interaction,
         ):
 
-            # ----------------------------------------------------------
+            # --------------------------------------------------------------
             # Delete webhook message.
-            # ----------------------------------------------------------
+            #
+            # The webhook itself is intentionally NOT deleted.
+            #
+            # This is important because multiple clans can share it.
+            # --------------------------------------------------------------
 
             if (
                 entry.message_id
                 and entry.webhook_url
             ):
 
-                timeout = (
-                    aiohttp.ClientTimeout(
-                        total=15
-                    )
+                timeout = aiohttp.ClientTimeout(
+                    total=15
                 )
 
                 async with aiohttp.ClientSession(
@@ -1847,15 +2103,21 @@ class ClanEmbeds(
                                 )
                             )
 
+                            if not isinstance(
+                                thread,
+                                discord.Thread,
+                            ):
+                                thread = None
+
                         await webhook.delete_message(
                             entry.message_id,
                             thread=thread,
                         )
 
-                    except discord.NotFound:
-                        pass
-
-                    except discord.HTTPException:
+                    except (
+                        discord.NotFound,
+                        discord.HTTPException,
+                    ):
                         pass
 
             self.store.remove_clan(
@@ -1899,15 +2161,16 @@ class ClanEmbeds(
                 "This will delete the posted "
                 "webhook embed and stored "
                 f"config for **{clan}**. "
-                "Continue?"
+                "The shared webhook itself will "
+                "NOT be deleted. Continue?"
             ),
             view=confirm_view,
             ephemeral=True,
         )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # /nexrules
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     nexrules = app_commands.Group(
         name="nexrules",
@@ -1973,9 +2236,9 @@ class ClanEmbeds(
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Setup
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 async def setup(
     bot: commands.Bot,

@@ -2,25 +2,36 @@
 Storage layer for the /nexclanembed and /nexrules embed system.
 
 data/clan_tags.json
-    READ ONLY. General clan-tag source used across the whole bot.
+READ ONLY.
+General clan-tag source used across the whole bot.
 
 data/clan_embeds.json
-    Owned entirely by this feature.
+Owned entirely by this feature.
 
 Clan showcase entries store:
-    - Clash clan tag
-    - description
-    - entry information
-    - Discord webhook URL
-    - channel ID
-    - thread ID
-    - webhook message ID
-    - last updated timestamp
+- Clash clan tag
+- description
+- entry information
+- Discord webhook URL
+- channel ID
+- thread ID
+- webhook message ID
+- last updated timestamp
 
 The same webhook can be used by multiple clans.
-Each clan can have a different thread ID.
+Each clan can have a different thread.
 
 All writes are atomic.
+
+The webhook itself is NOT created by this storage layer.
+
+The Discord cog is responsible for:
+- finding an existing NAYTRO NEXUS webhook
+- creating one if none exists
+- detecting a deleted webhook
+- recreating/reusing a replacement webhook
+
+This file only stores the resulting webhook URL.
 """
 
 from __future__ import annotations
@@ -28,7 +39,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -37,39 +48,35 @@ TAGS_PATH = "data/clan_tags.json"
 EMBEDS_PATH = "data/clan_embeds.json"
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # clan_tags.json
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def load_clan_tags() -> dict[str, str]:
     """
-    Returns:
+    Load clan names and Clash of Clans tags.
 
-        {
-            "CLAN NAME": "#CLANTAG"
-        }
-
-    Supports:
+    Supported formats:
 
     Shape A:
-        {
-            "PINEAPPLES": "#ABC123"
-        }
+    {
+        "PINEAPPLES": "#ABC123"
+    }
 
     Shape B:
-        {
-            "PINEAPPLES": {
-                "tag": "#ABC123"
-            }
+    {
+        "PINEAPPLES": {
+            "tag": "#ABC123"
         }
+    }
 
     Shape C:
-        [
-            {
-                "name": "PINEAPPLES",
-                "tag": "#ABC123"
-            }
-        ]
+    [
+        {
+            "name": "PINEAPPLES",
+            "tag": "#ABC123"
+        }
+    ]
     """
 
     if not os.path.exists(TAGS_PATH):
@@ -102,9 +109,9 @@ def load_clan_tags() -> dict[str, str]:
     return result
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Data models
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 @dataclass
 class ClanEmbedEntry:
@@ -119,10 +126,13 @@ class ClanEmbedEntry:
 
     requirements:
         Entry requirements / hit rate / wars required etc.
-        This is displayed WITHOUT a "Requirements" heading.
+        Displayed without a "Requirements" heading.
 
     webhook_url:
         Discord webhook used to publish the embed.
+
+        This is automatically discovered/created by the Discord cog.
+        The user does NOT manually configure this.
 
     channel_id:
         Parent channel containing the webhook.
@@ -133,6 +143,8 @@ class ClanEmbedEntry:
     message_id:
         ID of the webhook-created message.
 
+    last_updated:
+        UTC timestamp of the last store update.
     """
 
     tag: str = ""
@@ -183,9 +195,9 @@ class IndexEmbedConfig:
         )
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Atomic storage
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 def _default_store() -> dict:
     return {
@@ -245,13 +257,15 @@ def atomic_write(
         raise
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
 # Store
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 class ClanEmbedStore:
     """
     Loads clan_embeds.json into memory and writes changes atomically.
+
+    clan_embeds.json is automatically created only when it does not exist.
     """
 
     def __init__(
@@ -262,6 +276,12 @@ class ClanEmbedStore:
         self._data = self._load()
 
     def _load(self) -> dict:
+
+        # --------------------------------------------------------------
+        # File does not exist.
+        #
+        # Create it once.
+        # --------------------------------------------------------------
 
         if not os.path.exists(self.path):
 
@@ -274,6 +294,12 @@ class ClanEmbedStore:
 
             return data
 
+        # --------------------------------------------------------------
+        # Existing file.
+        #
+        # Load it. Do NOT recreate it.
+        # --------------------------------------------------------------
+
         with open(
             self.path,
             "r",
@@ -281,6 +307,9 @@ class ClanEmbedStore:
         ) as f:
 
             data = json.load(f)
+
+        if not isinstance(data, dict):
+            data = _default_store()
 
         data.setdefault(
             "clans",
@@ -292,19 +321,48 @@ class ClanEmbedStore:
             asdict(IndexEmbedConfig()),
         )
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------
+        # Ensure index fields exist.
+        # --------------------------------------------------------------
+
+        index = data["index_embed"]
+
+        if not isinstance(index, dict):
+            index = {}
+
+        index.setdefault(
+            "channel_id",
+            None,
+        )
+
+        index.setdefault(
+            "thread_id",
+            None,
+        )
+
+        index.setdefault(
+            "message_id",
+            None,
+        )
+
+        data["index_embed"] = index
+
+        # --------------------------------------------------------------
         # Migrate older clan entries.
         #
-        # Old versions may contain:
-        #   emoji
-        #   tier
-        #
-        # We intentionally don't remove them here because leaving unknown
-        # legacy fields in the JSON is harmless and protects old data.
-        # The loader simply ignores them.
-        # ---------------------------------------------------------------
+        # Unknown legacy fields are intentionally preserved in the
+        # JSON but ignored by get_clan().
+        # --------------------------------------------------------------
 
-        for raw in data["clans"].values():
+        clans = data["clans"]
+
+        if not isinstance(clans, dict):
+            clans = {}
+
+        for raw in clans.values():
+
+            if not isinstance(raw, dict):
+                continue
 
             raw.setdefault(
                 "tag",
@@ -346,6 +404,8 @@ class ClanEmbedStore:
                 None,
             )
 
+        data["clans"] = clans
+
         return data
 
     def save(self) -> None:
@@ -354,9 +414,9 @@ class ClanEmbedStore:
             self._data,
         )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Clan entries
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     def get_clan(
         self,
@@ -369,7 +429,7 @@ class ClanEmbedStore:
             return None
 
         # Only load fields used by the current version.
-        # This safely ignores legacy emoji/tier fields.
+        # Legacy fields such as emoji/tier are ignored safely.
         allowed = {
             "tag",
             "description",
@@ -440,7 +500,7 @@ class ClanEmbedStore:
         self,
     ) -> dict[str, ClanEmbedEntry]:
 
-        result = {}
+        result: dict[str, ClanEmbedEntry] = {}
 
         for name in self._data["clans"]:
 
@@ -451,9 +511,9 @@ class ClanEmbedStore:
 
         return result
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Index embed
-    # ------------------------------------------------------------------
+    # ========================================================================
 
     def get_index_embed(
         self,
@@ -464,8 +524,19 @@ class ClanEmbedStore:
             asdict(IndexEmbedConfig()),
         )
 
+        if not isinstance(raw, dict):
+            raw = asdict(IndexEmbedConfig())
+
         return IndexEmbedConfig(
-            **raw
+            channel_id=raw.get(
+                "channel_id"
+            ),
+            thread_id=raw.get(
+                "thread_id"
+            ),
+            message_id=raw.get(
+                "message_id"
+            ),
         )
 
     def set_index_embed(
