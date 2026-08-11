@@ -407,10 +407,10 @@ class ClanEmbeds(commands.Cog):
         self.bot = bot
         self.store = ClanEmbedStore()
 
-    nexclan = app_commands.Group(name="nexclan", description="Manage clan showcase embeds")
+    nexclan = app_commands.Group(name="nexclanembed", description="Manage clan showcase embeds")
     nexrules = app_commands.Group(name="nexrules", description="Manage the clan rules index embed")
 
-    @nexclan.command(name="embed", description="Create or edit a clan's showcase embed")
+    @nexclan.command(name="edit", description="Create or edit a clan's showcase embed")
     async def nexclan_embed(self, interaction: discord.Interaction):
         tags = load_clan_tags()
         if not tags:
