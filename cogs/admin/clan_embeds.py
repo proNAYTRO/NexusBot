@@ -153,6 +153,102 @@ class ClashAPI:
 
                 return data
 
+    async def get_warlog(
+        self,
+        clan_tag: str,
+    ) -> list[dict]:
+
+        if not self.api_key:
+            raise ClashAPIError(
+                "COC_API_KEY is missing."
+            )
+
+        encoded_tag = quote(
+            clan_tag.strip(),
+            safe="",
+        )
+
+        url = (
+            f"{COC_API_BASE}/clans/"
+            f"{encoded_tag}/warlog"
+        )
+
+        headers = {
+            "Authorization": (
+                f"Bearer {self.api_key}"
+            ),
+            "Accept": "application/json",
+        }
+
+        timeout = aiohttp.ClientTimeout(
+            total=15
+        )
+
+        async with aiohttp.ClientSession(
+            headers=headers,
+            timeout=timeout,
+        ) as session:
+
+            async with session.get(
+                url
+            ) as response:
+
+                if response.status == 403:
+
+                    # War log is set to private for this clan.
+                    return []
+
+                try:
+                    data = await response.json()
+
+                except Exception:
+                    data = {}
+
+                if response.status != 200:
+
+                    reason = data.get(
+                        "reason",
+                        f"HTTP {response.status}",
+                    )
+
+                    raise ClashAPIError(
+                        reason
+                    )
+
+                return data.get(
+                    "items",
+                    [],
+                )
+
+
+def calculate_war_streak(
+    warlog_items: list[dict],
+) -> Optional[int]:
+    """
+    Count consecutive wins from the most recent war backwards.
+
+    Stops at the first loss/tie. Returns None if the war log is
+    empty or private (get_warlog returns [] in that case).
+
+    Note: CWL wars do not appear in this log, so this streak
+    reflects regular clan wars only.
+    """
+
+    if not warlog_items:
+        return None
+
+    streak = 0
+
+    for war in warlog_items:
+
+        if war.get("result") == "win":
+            streak += 1
+
+        else:
+            break
+
+    return streak
+
 
 # ============================================================================
 # Clash API formatting
@@ -501,6 +597,7 @@ async def ensure_clan_webhook(
 
 def format_war_performance(
     clan: dict,
+    streak: Optional[int] = None,
 ) -> str:
 
     wins = clan.get(
@@ -525,11 +622,19 @@ def format_war_performance(
 
         return "War log private"
 
-    return (
+    line = (
         f"**{wins}W** · "
         f"**{losses}L** · "
         f"**{ties}D**"
     )
+
+    if streak:
+
+        line += (
+            f"\n🔥 {streak} Win Streak"
+        )
+
+    return line
 
 
 def format_cwl_league(
@@ -748,7 +853,8 @@ def build_clan_embed(
     embed.add_field(
         name="War Performance",
         value=format_war_performance(
-            clan
+            clan,
+            streak=entry.war_streak,
         ),
         inline=True,
     )
@@ -881,9 +987,9 @@ class EditInfoModal(
 
         self.panel = panel
 
-        self.description_input = (
+        self.info_input = (
             discord.ui.TextInput(
-                label="Description",
+                label="Clan Info",
                 style=discord.TextStyle.paragraph,
                 default=entry.description,
                 required=False,
@@ -891,22 +997,8 @@ class EditInfoModal(
             )
         )
 
-        self.requirements_input = (
-            discord.ui.TextInput(
-                label="Entry Information",
-                style=discord.TextStyle.paragraph,
-                default=entry.requirements,
-                required=False,
-                max_length=1024,
-            )
-        )
-
         self.add_item(
-            self.description_input
-        )
-
-        self.add_item(
-            self.requirements_input
+            self.info_input
         )
 
     async def on_submit(
@@ -922,11 +1014,7 @@ class EditInfoModal(
         )
 
         entry.description = (
-            self.description_input.value.strip()
-        )
-
-        entry.requirements = (
-            self.requirements_input.value.strip()
+            self.info_input.value.strip()
         )
 
         self.panel.store.upsert_clan(
@@ -1065,6 +1153,26 @@ class ClanPanelView(
             self.tag
         )
 
+    async def get_war_streak(
+        self,
+    ) -> Optional[int]:
+
+        try:
+
+            warlog = await self.api.get_warlog(
+                self.tag
+            )
+
+        except ClashAPIError:
+
+            # Don't block publishing over a warlog hiccup —
+            # just show no streak this round.
+            return None
+
+        return calculate_war_streak(
+            warlog
+        )
+
     async def publish_or_edit(
         self,
         interaction: discord.Interaction,
@@ -1101,6 +1209,8 @@ class ClanPanelView(
             )
 
             return
+
+        entry.war_streak = await self.get_war_streak()
 
         embed = build_clan_embed(
             self.clan_name,
@@ -1281,6 +1391,11 @@ class ClanPanelView(
 
             clan = await self.get_clan_data()
 
+            if entry.war_streak is None:
+                entry.war_streak = (
+                    await self.get_war_streak()
+                )
+
             embed = build_clan_embed(
                 self.clan_name,
                 entry,
@@ -1300,13 +1415,6 @@ class ClanPanelView(
                 ),
                 color=discord.Color.dark_purple(),
             )
-
-            if entry.requirements:
-
-                embed.description += (
-                    "\n\n"
-                    + entry.requirements
-                )
 
         location = "not set"
 
@@ -1532,6 +1640,20 @@ class ClanSelect(
                 tag
             )
 
+            try:
+
+                warlog = await self.api.get_warlog(
+                    tag
+                )
+
+                entry.war_streak = (
+                    calculate_war_streak(warlog)
+                )
+
+            except ClashAPIError:
+
+                entry.war_streak = None
+
             embed = build_clan_embed(
                 name,
                 entry,
@@ -1549,13 +1671,6 @@ class ClanSelect(
                 ),
                 color=discord.Color.dark_purple(),
             )
-
-            if entry.requirements:
-
-                embed.description += (
-                    "\n\n"
-                    + entry.requirements
-                )
 
             await interaction.response.edit_message(
                 content=(

@@ -160,6 +160,11 @@ class ClanEmbedEntry:
 
     last_updated: Optional[str] = None
 
+    # Refreshed live from the Clash API every time the embed is
+    # published/edited. Gets overwritten on every publish, so any
+    # stale value sitting in storage between publishes is harmless.
+    war_streak: Optional[int] = None
+
     def touch(self) -> None:
         self.last_updated = datetime.now(
             timezone.utc
@@ -439,6 +444,7 @@ class ClanEmbedStore:
             "thread_id",
             "message_id",
             "last_updated",
+            "war_streak",
         }
 
         cleaned = {
