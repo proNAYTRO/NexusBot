@@ -62,6 +62,52 @@ from ._clan_embed_store import (
 )
 
 
+
+
+# Diognosis command to check the state of the application emojis.
+
+
+@commands.command()
+@commands.is_owner()
+async def testappemoji(self, ctx):
+    try:
+        emojis = await self.bot.fetch_application_emojis()
+
+        lines = []
+
+        for e in emojis:
+            if e.name in {
+                "TH18",
+                "TH17",
+                "TH16",
+                "Champ_1",
+                "Champ_2",
+                "Champ_3",
+            }:
+                lines.append(
+                    f"name={e.name} | "
+                    f"id={e.id} | "
+                    f"animated={e.animated} | "
+                    f"str={str(e)} | "
+                    f"repr={repr(e)}"
+                )
+
+        if not lines:
+            await ctx.send(
+                "No matching application emojis found."
+            )
+            return
+
+        await ctx.send(
+            "\n".join(lines)
+        )
+
+    except Exception as exc:
+        await ctx.send(
+            f"ERROR: `{type(exc).__name__}: {exc}`"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Clash API
 # ---------------------------------------------------------------------------
