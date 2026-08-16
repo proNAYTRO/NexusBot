@@ -47,6 +47,13 @@ _SKIP_SUBSTR = (
 # their own they're clickable-link labels, not caption text.
 _SKIP_EXACT = {"link", "links", "copy base", "copy layout", "copy", "download", "click here", "open"}
 
+# Some seller PDFs print the OpenLayout URL as plain visible text instead of a
+# real clickable annotation (no entry in page.get_links()). This regex is the
+# fallback that catches those — matched against the page's raw extracted text.
+_TEXT_LINK_RE = re.compile(
+    r"https?://link\.clashofclans\.com/\S*action=OpenLayout\S*", re.I
+)
+
 
 @dataclass
 class BaseCandidate:
@@ -206,6 +213,19 @@ def _layout_id(uri: str) -> str:
     return uri  # fall back to the whole URL
 
 
+def _find_text_links(page) -> list:
+    """Fallback for pages with no real link annotation: pull OpenLayout URLs
+    straight out of the visible page text. Returns the same shape page.get_links()
+    would (list of dicts with at least 'uri' and 'from'), so callers can treat
+    both sources identically."""
+    text = page.get_text("text")
+    out = []
+    for m in _TEXT_LINK_RE.finditer(text):
+        url = m.group(0).rstrip(").,;:]}\u201d'\"")
+        out.append({"uri": url, "from": page.rect})
+    return out
+
+
 def _page_lines(page) -> list:
     """All text lines on the page as cleaned strings, in reading order."""
     out = []
@@ -247,6 +267,10 @@ def extract_bases(pdf_bytes: bytes) -> list:
                 l for l in page.get_links()
                 if l.get("uri") and "openlayout" in l["uri"].lower()
             ]
+            if not links:
+                # No real clickable annotation — try pulling the URL out of the
+                # visible page text instead (some seller PDFs just print it).
+                links = _find_text_links(page)
             if not links:
                 continue
 
