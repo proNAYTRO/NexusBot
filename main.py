@@ -53,7 +53,7 @@ async def on_ready():
         existing = await bot.http.get_global_commands(bot.application_id)
         entry_point = next((c for c in existing if c.get("type") == 4), None)
 
-        all_commands = [c.to_dict() for c in bot.tree.get_commands()]
+        all_commands = [c.to_dict(bot.tree) for c in bot.tree.get_commands()]
         if entry_point:
             all_commands.append(entry_point)
 
