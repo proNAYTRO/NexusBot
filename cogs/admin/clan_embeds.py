@@ -78,7 +78,7 @@ from ._clan_embed_store import (
 COC_API_BASE = (
     "https://api.clashofclans.com/v1"
 )
-WEBHOOK_NAME = "Krewe of Clash"
+WEBHOOK_NAME = "Krewe Clash"
 WEBHOOK_AVATAR_URL = "https://i.imgur.com/39komel.png"
 
 
