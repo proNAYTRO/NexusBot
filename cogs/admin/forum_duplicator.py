@@ -67,25 +67,34 @@ class ForumDuplicator(commands.Cog):
             for tag in source.available_tags
         ]
 
-        overwrites = source.overwrites if duplicate_permissions else None
+        # Build kwargs step by step, only including optional settings that
+        # actually have a real value. Discord's API rejects several of these
+        # if you pass None explicitly (it wants them left out entirely).
+        create_kwargs = dict(
+            name=target_name,
+            category=source.category,
+            topic=source.topic,
+            nsfw=source.nsfw,
+            slowmode_delay=source.slowmode_delay,
+            default_auto_archive_duration=source.default_auto_archive_duration,
+            default_thread_slowmode_delay=source.default_thread_slowmode_delay,
+            default_layout=source.default_layout,
+            available_tags=new_tags,
+            reason=f"Duplicated from #{source.name} by {interaction.user}",
+        )
+
+        if source.default_sort_order is not None:
+            create_kwargs["default_sort_order"] = source.default_sort_order
+
+        if source.default_reaction_emoji is not None:
+            create_kwargs["default_reaction_emoji"] = source.default_reaction_emoji
+
+        if duplicate_permissions and source.overwrites:
+            create_kwargs["overwrites"] = source.overwrites
 
         try:
-            new_forum = await guild.create_forum(
-                name=target_name,
-                category=source.category,
-                topic=source.topic,
-                nsfw=source.nsfw,
-                slowmode_delay=source.slowmode_delay,
-                default_auto_archive_duration=source.default_auto_archive_duration,
-                default_thread_slowmode_delay=source.default_thread_slowmode_delay,
-                default_sort_order=source.default_sort_order or discord.ForumOrderType.latest_activity,
-                default_layout=source.default_layout,
-                default_reaction_emoji=source.default_reaction_emoji or discord.utils.MISSING,
-                available_tags=new_tags,
-                overwrites=overwrites,
-                reason=f"Duplicated from #{source.name} by {interaction.user}",
-            )
-        except discord.HTTPException as e:
+            new_forum = await guild.create_forum(**create_kwargs)
+        except Exception as e:
             await interaction.followup.send(f"Couldn't create the new forum: {e}")
             return
 
@@ -127,7 +136,7 @@ class ForumDuplicator(commands.Cog):
                     applied_tags=applied_tags,
                 )
                 created += 1
-            except discord.HTTPException:
+            except Exception:
                 failed += 1
 
             await asyncio.sleep(1)  # go easy on rate limits for large forums
