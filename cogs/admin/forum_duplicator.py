@@ -80,7 +80,7 @@ class ForumDuplicator(commands.Cog):
                 default_thread_slowmode_delay=source.default_thread_slowmode_delay,
                 default_sort_order=source.default_sort_order or discord.ForumOrderType.latest_activity,
                 default_layout=source.default_layout,
-                default_reaction_emoji=source.default_reaction_emoji,
+                default_reaction_emoji=source.default_reaction_emoji or discord.utils.MISSING,
                 available_tags=new_tags,
                 overwrites=overwrites,
                 reason=f"Duplicated from #{source.name} by {interaction.user}",
