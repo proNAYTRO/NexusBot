@@ -42,18 +42,25 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-try:
-    existing = await bot.http.get_global_commands(bot.application_id)
-    entry_point = next((c for c in existing if c.get("type") == 4), None)
+@bot.event
+async def on_ready():
+    divider()
+    log("✓", GREEN,  "BOT",     f"{bot.user} (ID: {bot.user.id})")
+    log("✓", GREEN,  "GUILDS",  str(len(bot.guilds)))
+    log("◉", CYAN,   "TIME",    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))
 
-    all_commands = [c.to_dict() for c in bot.tree.get_commands()]
-    if entry_point:
-        all_commands.append(entry_point)
+    try:
+        existing = await bot.http.get_global_commands(bot.application_id)
+        entry_point = next((c for c in existing if c.get("type") == 4), None)
 
-    synced = await bot.http.bulk_upsert_global_commands(bot.application_id, all_commands)
-    log("✓", GREEN, "COMMANDS", f"{len(synced)} slash command(s) synced")
-except Exception as e:
-    log("✗", RED, "SYNC", str(e))
+        all_commands = [c.to_dict() for c in bot.tree.get_commands()]
+        if entry_point:
+            all_commands.append(entry_point)
+
+        synced = await bot.http.bulk_upsert_global_commands(bot.application_id, all_commands)
+        log("✓", GREEN, "COMMANDS", f"{len(synced)} slash command(s) synced")
+    except Exception as e:
+        log("✗", RED, "SYNC", str(e))
 
     presence_text = "/nexhelp..."
     await bot.change_presence(
