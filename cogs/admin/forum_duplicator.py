@@ -78,7 +78,7 @@ class ForumDuplicator(commands.Cog):
                 slowmode_delay=source.slowmode_delay,
                 default_auto_archive_duration=source.default_auto_archive_duration,
                 default_thread_slowmode_delay=source.default_thread_slowmode_delay,
-                default_sort_order=source.default_sort_order,
+                default_sort_order=source.default_sort_order or discord.ForumOrderType.latest_activity,
                 default_layout=source.default_layout,
                 default_reaction_emoji=source.default_reaction_emoji,
                 available_tags=new_tags,
@@ -141,9 +141,14 @@ class ForumDuplicator(commands.Cog):
     @duplicate_forum.error
     async def duplicate_forum_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message("You need Manage Channels to do that.", ephemeral=True)
+            message = "You need Manage Channels to do that."
         else:
-            raise error
+            message = f"Something went wrong: {error}"
+
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
