@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from utils.db import init_db, upsert_war, upsert_attack
 from utils.emojis import emoji
 
-ADMIN_ID = (1248543623830573087, 1048729773926522981)
+ADMIN_ID = 1048729773926522981
 
 COC_BASE   = "https://api.clashofclans.com/v1"
 TIMEOUT    = aiohttp.ClientTimeout(connect=5, sock_read=20)
