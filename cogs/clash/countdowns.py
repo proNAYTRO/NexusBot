@@ -151,6 +151,7 @@ class Countdowns(commands.Cog):
         #                   "clans": {tag: {"channel_id": int, "name": str}}}
         self.session: aiohttp.ClientSession | None = None
         self.name_cache: dict[str, str] = {}
+        self.cwl_cache: dict[str, set] = {}  # warTag -> {clan tags in it}
         self.sem = asyncio.Semaphore(5)
 
     async def cog_load(self):
@@ -205,6 +206,48 @@ class Countdowns(commands.Cog):
             await asyncio.gather(*(self.clan_name(t) for t in missing))
         return {t: self.name_cache.get(t, t) for t in saved}
 
+    @staticmethod
+    def timer_text(war: dict, label: str = "") -> str:
+        now = datetime.now(timezone.utc)
+        state = war.get("state")
+        if state == "preparation":
+            left = (parse_coc_time(war["startTime"]) - now).total_seconds()
+            return f"{label}Prep {fmt(left)}"
+        if state == "inWar":
+            left = (parse_coc_time(war["endTime"]) - now).total_seconds()
+            return f"{label}War {fmt(left)}"
+        if state == "warEnded":
+            return f"{label}War ended"
+        return "Not in war"
+
+    async def cwl_war(self, tag: str):
+        """The clan's war in the latest started CWL round, or None."""
+        status, group = await self.api_get(
+            f"/clans/{quote(tag)}/currentwar/leaguegroup"
+        )
+        if status != 200 or not group:
+            return None  # not in CWL
+
+        for rnd in reversed(group.get("rounds", [])):
+            war_tags = [w for w in rnd.get("warTags", []) if w != "#0"]
+            if not war_tags:
+                continue  # round hasn't started yet
+
+            # Which war in this round is ours? Membership never changes,
+            # so it's cached after the first lookup.
+            for wt in war_tags:
+                known = self.cwl_cache.get(wt)
+                if known is not None and tag not in known:
+                    continue
+                s, war = await self.api_get(f"/clanwarleagues/wars/{quote(wt)}")
+                if s != 200 or not war:
+                    continue
+                self.cwl_cache[wt] = {war["clan"]["tag"], war["opponent"]["tag"]}
+                if tag in self.cwl_cache[wt]:
+                    return war
+            return None
+        return None
+
     async def war_text(self, tag: str):
         """Timer text, or None to skip this update (API hiccup)."""
         status, data = await self.api_get(f"/clans/{quote(tag)}/currentwar")
@@ -213,14 +256,13 @@ class Countdowns(commands.Cog):
         if status != 200 or data is None:
             return None
 
-        now = datetime.now(timezone.utc)
-        state = data.get("state")
-        if state == "preparation":
-            return f"Prep {fmt((parse_coc_time(data['startTime']) - now).total_seconds())}"
-        if state == "inWar":
-            return f"War {fmt((parse_coc_time(data['endTime']) - now).total_seconds())}"
-        if state == "warEnded":
-            return "War ended"
+        if data.get("state") != "notInWar":
+            return self.timer_text(data)
+
+        # Not in a regular war -> check CWL
+        cwl = await self.cwl_war(tag)
+        if cwl:
+            return self.timer_text(cwl)
         return "Not in war"
 
     # ---- panel
