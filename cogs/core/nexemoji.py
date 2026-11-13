@@ -9,9 +9,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.cwl.capture import ADMIN_ID
 from utils.emojis import EMOJI_IDS, emoji
 
+ADMIN_ID = 1048729773926522981
 NEXUS_RED = 0xE8173A
 _HEROES = {"BK", "AQ", "GW", "RC", "DD", "MP"}
 _LEAGUE_PREFIXES = {"Bronze", "Silver", "Gold", "Crystal", "Master", "Champ", "Titan", "Legend"}
